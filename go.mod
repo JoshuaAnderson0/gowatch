@@ -1,4 +1,4 @@
-module github.com/NaAquelo/gowatch/cmd
+module github.com/NaAquelo/gowatch
 
 go 1.21.4
 
