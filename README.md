@@ -27,15 +27,13 @@ cmd = "go run main.go"
   # Directories to exclude
   exclude_dirs = ["vendor"]
 
-# Command configuration
-[command]
-  # Example command for .go files
-  [".go"]
-    cmd = "go run main.go"
+# Example command for .go files
+[command.".go"]
+cmd = "go run main.go"
 
-  # Example command for .ts files
-  [".ts"]
-    cmd = "tsc -p ."
+# Example command for .ts files
+[command.".ts"]
+cmd = "tsc -p ."
 ```
 
 ## Notes:
