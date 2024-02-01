@@ -2,7 +2,6 @@ package main
 
 import (
 	"strings"
-	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -11,9 +10,8 @@ import (
 type Config struct {
 	WatchConfig   `toml:"watch"`
 	CommandConfig `toml:"command"`
-	RootDirectory string  `toml:"root"`  // The root directory the programming is watching in
-	RunCmd        string  `toml:"cmd"`   // The command to run at startup or during a generic reload
-	Delay         float32 `toml:"delay"` // The amount of time to sleep after a file event
+	RootDirectory string `toml:"root"` // The root directory the programming is watching in
+	RunCmd        string `toml:"cmd"`  // The command to run at startup or during a generic reload
 }
 
 // The watch config
@@ -33,10 +31,6 @@ type CommandConfig map[string]struct {
 func newConfig(rawToml []byte) (Config, error) {
 	var config Config
 	err := toml.Unmarshal(rawToml, &config)
-
-	if config.Delay == 0 {
-		config.Delay = float32(time.Second) * 0.5
-	}
 
 	return config, err
 }
@@ -90,7 +84,7 @@ func (c Config) shouldWatchFile(file string) bool {
 // Searches through the commands to try and find a match based on the file type that's being built
 func (c Config) getRunCmd(file string) string {
 	for name, command := range c.CommandConfig {
-		if strings.HasPrefix(file, name) {
+		if strings.HasSuffix(file, name) {
 			return command.Cmd
 		}
 	}

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -17,6 +16,7 @@ type Watcher struct {
 
 	eventCh           chan string
 	watchingProcessCh chan bool
+	processFinishedCh chan bool
 	exitProgramCh     chan bool
 	exitProcessCh     chan bool
 }
@@ -33,6 +33,7 @@ func newWatcher(config Config) (*Watcher, error) {
 		Watcher:           watcher,
 		eventCh:           make(chan string),
 		watchingProcessCh: make(chan bool),
+		processFinishedCh: make(chan bool),
 		exitProgramCh:     make(chan bool),
 		exitProcessCh:     make(chan bool),
 	}, nil
@@ -55,42 +56,27 @@ func (w *Watcher) Start() error {
 
 	go w.runCmd(w.RunCmd)
 
-	fmt.Println(">>> Listening for events <<<")
-
-	doneCh := make(chan bool)
+	programDoneCh := make(chan bool)
 	go func() {
 		for {
 			select {
 			case <-w.exitProgramCh:
-				doneCh <- true
-				return
+				programDoneCh <- true
 
 			case path := <-w.Events:
-				fileInfo, err := os.Stat(path.Name)
-
-				if err == nil && fileInfo.IsDir() {
-					err = filepath.Walk(w.RootDirectory, w.watchDirectory)
-				}
-
-				if err != nil {
-					fmt.Printf(">>> Error while trying to watch new directory: %s <<<\n", err)
-					continue
-				}
-
-				w.stopRunningProcess()
-
-				if !fileInfo.IsDir() && w.shouldWatchFile(fileInfo.Name()) {
-					fmt.Printf(">>> File %s modified. Reloading <<<\n", fileInfo.Name())
-					go w.runCmd(w.getRunCmd(fileInfo.Name()))
+				if w.shouldWatchFile(path.Name) {
+					fmt.Println()
+					fmt.Printf(">>> File %s modified. Reloading <<<\n", path.Name)
+					w.stopRunningProcess()
+					go w.runCmd(w.getRunCmd(path.Name))
 				}
 			}
 
-			time.Sleep(time.Duration(w.Delay))
 			w.flushEvents()
 		}
 	}()
 
-	<-doneCh
+	<-programDoneCh
 	return nil
 }
 
@@ -117,46 +103,64 @@ func (w *Watcher) stop() {
 func (w *Watcher) stopRunningProcess() {
 	select {
 	case <-w.watchingProcessCh:
+		fmt.Println(">>> Killing process <<<")
 		w.exitProcessCh <- true
+		<-w.processFinishedCh
+	case <-w.processFinishedCh:
 	default:
 	}
 }
 
 // Runs a new command
-func (w *Watcher) runCmd(cmd string) error {
-	c, stdout, stderr, err := startCmd(cmd)
-	if err != nil {
-		return err
-	}
-
-	_, _ = io.Copy(os.Stdout, stdout)
-	_, _ = io.Copy(os.Stderr, stderr)
+func (w *Watcher) runCmd(cmd string) {
+	fmt.Println()
+	fmt.Printf(">>> Starting command: %s <<<\n", cmd)
 
 	go func() {
 		w.watchingProcessCh <- true
 	}()
 
-	processFinishedCh := make(chan error)
+	c, err := startCmd(cmd)
+	if err != nil {
+		fmt.Printf("\n>>> Error when starting process: %s <<<\n", err)
+	}
+
+	defer func() {
+		fmt.Println(">>> Process finished <<<")
+
+		select {
+		case <-w.watchingProcessCh:
+		default:
+		}
+
+		w.processFinishedCh <- true
+	}()
+
+	fmt.Println(">>> Watching new process <<<")
+	fmt.Println()
+
+	processFinishCh := make(chan error)
 	go func() {
-		processFinishedCh <- c.Wait()
+		processFinishCh <- c.Wait()
 	}()
 
 	select {
 	case <-w.exitProcessCh:
-		err = c.Process.Kill()
-	case err = <-processFinishedCh:
+		if err = killCmd(c); err != nil {
+			fmt.Printf("\n>>> Error when terminating process: %s <<<\n", err)
+		} else {
+			fmt.Println(">>> Process interrupted <<<")
+		}
+		return
+
+	case err = <-processFinishCh:
+		if err = killCmd(c); err != nil {
+			fmt.Printf("\n>>> Error when terminating process: %s <<<\n", err)
+		} else {
+			fmt.Println("\n>>> Process finished by it self <<<")
+		}
+		return
 	}
-
-	stdout.Close()
-	stderr.Close()
-
-	select {
-	case <-w.watchingProcessCh:
-	default:
-	}
-
-	fmt.Println(">>> Process finished <<<")
-	return err
 }
 
 // Adds a directory to the watcher object
